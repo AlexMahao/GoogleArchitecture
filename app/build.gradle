@@ -28,7 +28,11 @@ dependencies {
     api 'com.android.support:appcompat-v7:26.1.0'
     // lifecycle
     implementation "android.arch.lifecycle:runtime:1.0.3"
+
     annotationProcessor "android.arch.lifecycle:compiler:1.0.0"
+
+
+
     // LiveDate ViewModel
     implementation "android.arch.lifecycle:extensions:1.0.0"
     // room
@@ -38,5 +42,6 @@ dependencies {
     implementation 'com.squareup.retrofit2:retrofit:2.3.0'
 
     implementation 'com.google.dagger:dagger:2.13'
-    annotationProcessor 'com.google.dagger:dagger-compiler:2.x'
+    annotationProcessor 'com.google.dagger:dagger-compiler:2.13'
+    testCompile 'junit:junit:4.12'
 }

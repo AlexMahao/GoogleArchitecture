@@ -22,7 +22,8 @@ public class UserProfileActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         viewModel = ViewModelProviders.of(this).get(UserProfileViewModel.class);
-        viewModel.init(userId);
+        // 初始化
+        viewModel.init("123");
 
         viewModel.getUser().observe(this, new Observer<User>() {
             @Override
@@ -31,6 +32,5 @@ public class UserProfileActivity extends AppCompatActivity {
             }
         });
     }
-
 
 }

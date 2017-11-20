@@ -1,0 +1,340 @@
+## 	Android 官方架构 ---- Lifecycle分析
+
+Lifecycle 是android 官方推出的官方架构中的其中之一，他是生命周期感知的，即他能够监听Activity和Fragment的生命周期，并且回调相应的方法，同时他能够实时的获取当前Activity和fragment的状态。
+
+Lifecycle已经发布了release版，所以其中的一些默认支持已经包含到了support-v7:26.1.0以及更高，所以本实现在26.1.0上实现。
+
+### 基本使用
+
+#### 添加依赖
+
+```
+//运行时
+ implementation "android.arch.lifecycle:runtime:1.0.3"
+ // 编译期
+ annotationProcessor "android.arch.lifecycle:compiler:1.0.0"
+```
+为了减少我们实现的代码，所以该框架使用注解+编译器自动生成辅助类的方式，所以需要添加两个依赖。
+
+
+### 编写监听类
+
+根据之前的说明，Lifecycle可以做两件事情：
+
+- 监听Activity的生命周期，该实现通过`Lifecycle`定义的`Event`来实现，该对象定义了对应`Activity`生命周期的多种事件。
+
+- 实时获取当前`Activity`的状态，通过`Lifecycle`的`State`来进行判断。
+
+而我们定义的编写监听类便来使用一下上面的两个功能，具体实现如下：
+
+```java 
+public class MyObserver implements LifecycleObserver {
+
+    private Lifecycle mLifecycle;
+
+    public MyObserver(Lifecycle mLifecycle) {
+        this.mLifecycle = mLifecycle;
+        // 添加监听
+        this.mLifecycle.addObserver(this);
+    }
+
+    @OnLifecycleEvent(Lifecycle.Event.ON_RESUME)
+    public void onResume() {
+        // 模拟网络请求，延时任务
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // 检查当前activity的创建
+                if (mLifecycle.getCurrentState().isAtLeast(Lifecycle.State.RESUMED)) {
+                    // onResume之后， onPause()之前
+                }
+            }
+        },2000);
+    }
+
+    @OnLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+    public void onPause() {
+
+    }
+}
+
+```
+对于该类，关键点主要4个部分。
+
+- 监听类必须要实现`LifecycleObserver`,`LifecycleObserver`是一个空接口，主要作为一种标示的存在，不需要实现任何方法。
+
+- 构造方法中，传入了一个`Lifecycle`,该对象由`Activity`传入，及初始化的时候传入，暂且先不管`activity`中怎么获取该对象。该对象中提供了`addObserver()`方法，即添加观察的方法。将当前对象传入进去。
+
+- 定义了两个方法`onResume()`和`onPause()`，该方法的名字可以随便起，这里为了清晰才这样命名。关键点在于这两个方法的注解，标明了他要监听什么方法。
+
+- 最后，在`onResume()`方法中模拟了一个网络请求的耗时操作，并且通过`mLifecycle.getCurrentState().isAtLeast(Lifecycle.State.RESUMED)`判断当前`activity`的状态。如果`activity`已经不在前台，可以不做处理等等。
+
+通过上面的监听，功能基本就差不多了。唯一的一个疑问便是构造方法中的`Lifecycle`对象怎么获取。
+
+### Lifecycle 对象
+
+在框架中定义了一个`LifecycleOwner`接口，该接口就一个方法
+
+```
+public interface LifecycleOwner {
+    Lifecycle getLifecycle();
+}
+
+```
+很明显，就是返回`Lifecycle`对象，而在support-v7:26.1.0中，`AppCompatActviity`已经默认实现了，所以在`Activity`中只需要初始化一下就行了，代码如下
+
+```
+mObserver = new MyObserver(getLifecycle());
+```
+
+
+### ProcessLifecycleOwner 全局app的生命周期
+
+
+### 状态的判断
+
+
+
+
+
+### 源码分析
+
+首先，根据之前的分析，该框架在编译时会生成一些代码，看一下app/build/generated/source/apt/包名/下生成了一个辅助文件，代码如下：
+```java
+public class MyObserver_LifecycleAdapter implements GeneratedAdapter {
+  final MyObserver mReceiver;
+
+  MyObserver_LifecycleAdapter(MyObserver receiver) {
+    this.mReceiver = receiver;
+  }
+
+  @Override
+  public void callMethods(LifecycleOwner owner, Lifecycle.Event event, boolean onAny,
+      MethodCallsLogger logger) {
+    boolean hasLogger = logger != null;
+    if (onAny) {
+      return;
+    }
+    if (event == Lifecycle.Event.ON_RESUME) {
+      if (!hasLogger || logger.approveCall("onResume", 1)) {
+      	// 回调
+        mReceiver.onResume();
+      }
+      return;
+    }
+    if (event == Lifecycle.Event.ON_PAUSE) {
+      if (!hasLogger || logger.approveCall("onPause", 1)) {
+      	// 回调
+        mReceiver.onPause();
+      }
+      return;
+    }
+  }
+}
+```
+看一下该类，可以发现主要是将注解解析之后生成的辅助类，想到于有生命周期回调时，先调用该方法，然后在分发，注意该类，后面是重点。
+
+
+然后，换个思路，我们查找该框架的入口，即初始化的地方。在看他的所有接口时，发现该接口`ProcessLifecycleOwnerInitializer`，部分代码如下：
+```java
+public class ProcessLifecycleOwnerInitializer extends ContentProvider {
+    @Override
+    public boolean onCreate() {
+        LifecycleDispatcher.init(getContext());
+        ProcessLifecycleOwner.init(getContext());
+        return true;
+    }
+    // ....
+}
+```
+
+该方法从命名上可以看出，他应该是入口。看他的实现，该类继承了`ContentProvder`，利用的`ContentProvider`的特性，及在程序初始化时会调用`onCreate()`方法。而`onCreate()`方法中，调用了两个初始化。其中`LifecycleDispatcher.init(getContext());`便是整个框架生命周期分发的部分。而`ProcessLifecycleOwner`是一个全局的生命周期的回调。用于监听app在前台还是在后台，此处暂且不管。
+
+看一下`LifecycleDispatcher.init(getContext());`代码
+
+```java
+static void init(Context context) {
+        if (sInitialized.getAndSet(true)) {
+            return;
+        }
+        // 全局的生命周期回调。
+        ((Application) context.getApplicationContext())
+                .registerActivityLifecycleCallbacks(new DispatcherActivityCallback());
+    }
+```
+该代码中注入了一个全局的生命周期回调，然后传入了一个`DispatcherActivityCallback`对象，该对象
+
+```java
+ static class DispatcherActivityCallback extends EmptyActivityLifecycleCallbacks {
+        private final FragmentCallback mFragmentCallback;
+
+        DispatcherActivityCallback() {
+            mFragmentCallback = new FragmentCallback();
+        }
+
+        @Override
+        public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
+            if (activity instanceof FragmentActivity) {
+                ((FragmentActivity) activity).getSupportFragmentManager()
+                        .registerFragmentLifecycleCallbacks(mFragmentCallback, true);
+            }
+            // 关键方法
+            ReportFragment.injectIfNeededIn(activity);
+        }
+
+        @Override
+        public void onActivityStopped(Activity activity) {
+            if (activity instanceof FragmentActivity) {
+                markState((FragmentActivity) activity, CREATED);
+            }
+        }
+
+        @Override
+        public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
+            if (activity instanceof FragmentActivity) {
+                markState((FragmentActivity) activity, CREATED);
+            }
+        }
+
+```
+因为该类中的方法，会回调每一个`Activity`的生命周期，其中`ReportFragment.injectIfNeededIn(activity);`从名字看出，是一个助于的方法，看一下该方法
+
+```java
+ public static void injectIfNeededIn(Activity activity) {
+        // ProcessLifecycleOwner should always correctly work and some activities may not extend
+        // FragmentActivity from support lib, so we use framework fragments for activities
+        android.app.FragmentManager manager = activity.getFragmentManager();
+        if (manager.findFragmentByTag(REPORT_FRAGMENT_TAG) == null) {
+            manager.beginTransaction().add(new ReportFragment(), REPORT_FRAGMENT_TAG).commit();
+            // Hopefully, we are the first to make a transaction.
+            manager.executePendingTransactions();
+        }
+    }
+```
+为`Activity`添加了一个无`UI`的`Fragment`，这样做的好处是将`Activity`的生命周期回调监听放到了`Fragment`中，不必重写`Activity`的回调方法。那么到这里
+> 我们总结一下如上流程：
+- 通过`ContentProvider`实现程序启动时实现初始化。
+- 注册`registerActivityLifecycleCallbacks()`监听`activity`的生命周期。主要是达到遍历`activity`的目的。
+- 为每一个`Activity`添加一个无`UI`的`Fragment`，将生命周期的监听添加到`Fragment`中。
+
+根据上面的分析，我们需要看一下`ReportFragment`的实现：
+
+```java
+ @Override
+    public void onActivityCreated(Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
+        // ...
+        dispatch(Lifecycle.Event.ON_CREATE);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        // ...
+        dispatch(Lifecycle.Event.ON_START);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        // ...
+        dispatch(Lifecycle.Event.ON_RESUME);
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        dispatch(Lifecycle.Event.ON_PAUSE);
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        dispatch(Lifecycle.Event.ON_STOP);
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        dispatch(Lifecycle.Event.ON_DESTROY);
+        // just want to be sure that we won't leak reference to an activity
+        mProcessListener = null;
+    }
+
+    private void dispatch(Lifecycle.Event event) {
+        Activity activity = getActivity();
+        if (activity instanceof LifecycleRegistryOwner) {
+           // 获取activity的Lifecycle对象，并分发事件。
+            ((LifecycleRegistryOwner) activity).getLifecycle().handleLifecycleEvent(event);
+            return;
+        }
+
+        if (activity instanceof LifecycleOwner) {
+            Lifecycle lifecycle = ((LifecycleOwner) activity).getLifecycle();
+            if (lifecycle instanceof LifecycleRegistry) {
+                ((LifecycleRegistry) lifecycle).handleLifecycleEvent(event);
+            }
+        }
+    }
+
+```
+
+`Fragment`中的代码比较清晰，监听每一个生命周期，调用`dispatch()`进行分发。
+
+然后调用`Lifecycle`的`handleLifecycleEvent()`方法，将事件分发。注意，此时很关键，在之前的使用时，调用了`getLifecycle().addObserver()`方法，将我们的监听添加到了`Lifecycle`上，那么到这里，他们有了交集了。最终添加和事件分发都到达了`Lifecycle`上。
+
+在这里打一下岔：我们看一下`addObserver()`方法：
+
+```java
+ @Override
+    public void addObserver(@NonNull LifecycleObserver observer) {
+        State initialState = mState == DESTROYED ? DESTROYED : INITIALIZED;
+        // 构造辅助类对象,该对象中包含了`MyObserver_LifecycleAdapter`对象
+        ObserverWithState statefulObserver = new ObserverWithState(observer, initialState);
+        // 我们自定义的对象为key,辅助类作为value存储，
+        ObserverWithState previous = mObserverMap.putIfAbsent(observer, statefulObserver);
+        // ..
+    }
+
+```
+可以看到，在`add`时，获取了自动生成的辅助类对象并作为存储。
+
+然后，回头我们看一下`handleLifecycleEvent()`方法，
+
+```java
+ public void handleLifecycleEvent(@NonNull Lifecycle.Event event) {
+        State next = getStateAfter(event);
+        moveToState(next);
+    }
+
+    private void moveToState(State next) {
+        if (mState == next) {
+            return;
+        }
+        mState = next;
+        if (mHandlingEvent || mAddingObserverCounter != 0) {
+            mNewEventOccurred = true;
+            // we will figure out what to do on upper level.
+            return;
+        }
+        mHandlingEvent = true;
+        sync();
+        mHandlingEvent = false;
+    }
+```
+
+方法中修改了状态，然后调用了`sync()`,然后分别调用了`forwardPass()` -> `observer.dispatchEvent(lifecycleOwner, upEvent(observer.mState));` -> `mLifecycleObserver.onStateChanged(owner, event);` 方法，该方法中`mLifecycleObserver`实际就是自动生成的辅助类。
+
+总结： 
+- 通过`ContentProvider`实现程序启动时实现初始化。
+- 注册`registerActivityLifecycleCallbacks()`监听`activity`的生命周期。主要是达到遍历`activity`的目的。
+- 为每一个`Activity`添加一个无`UI`的`Fragment`，将生命周期的监听添加到`Fragment`中。
+- 在通过`getLifecycle().addObserver()`添加监听时，会获取到辅助类一起保存（自动生成的辅助类）
+- 根据`Fragment`的生命周期，将事件分发到`Lifecycle`中。然后在`Lifecycle`中将生命周期分发到辅助类，最后在分发到我们自定义的监听对象。
+
+
+
+
+
+
+
